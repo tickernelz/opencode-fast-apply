@@ -1,23 +1,26 @@
 /**
- * OpenCode Morph Fast Apply Plugin
+ * OpenCode Fast Apply Plugin
  *
- * Integrates Morph's Fast Apply API for 10x faster code editing.
+ * Integrates OpenAI-compatible Fast Apply API for 10x faster code editing.
+ * Supports LM Studio, Ollama, and other OpenAI-compatible endpoints.
  * Uses lazy edit markers (// ... existing code ...) for partial file updates.
  *
- * @see https://docs.morphllm.com/quickstart
+ * @see https://github.com/tickernelz/opencode-fast-apply
  */
 
 import { type Plugin, tool } from "@opencode-ai/plugin"
 import { createTwoFilesPatch } from "diff"
 
 // Get API key from environment (set in mcpm/jarvis config)
-const MORPH_API_KEY = process.env.MORPH_API_KEY
-const MORPH_API_URL = process.env.MORPH_API_URL || "https://api.morphllm.com"
-const MORPH_MODEL = process.env.MORPH_MODEL || "morph-v3-fast"
-const MORPH_TIMEOUT = parseInt(process.env.MORPH_TIMEOUT || "30000", 10)
+const FAST_APPLY_API_KEY = process.env.FAST_APPLY_API_KEY || "optional-api-key"
+const FAST_APPLY_URL = process.env.FAST_APPLY_URL || "http://localhost:1234/v1"
+const FAST_APPLY_MODEL = process.env.FAST_APPLY_MODEL || "fastapply-1.5b"
+const FAST_APPLY_TIMEOUT = parseInt(process.env.FAST_APPLY_TIMEOUT || "30000", 10)
+const FAST_APPLY_TEMPERATURE = parseFloat(process.env.FAST_APPLY_TEMPERATURE || "0.05")
+const FAST_APPLY_MAX_TOKENS = parseInt(process.env.FAST_APPLY_MAX_TOKENS || "8000", 10)
 
 /** Plugin version */
-const PLUGIN_VERSION = "1.1.0"
+const PLUGIN_VERSION = "2.0.0"
 
 /**
  * Generate a unified diff with context for display
@@ -66,40 +69,41 @@ function countChanges(diff: string): { added: number; removed: number } {
 }
 
 /**
- * Call Morph's Apply API to merge code edits
+ * Call OpenAI's Fast Apply API to merge code edits
  */
-async function callMorphApply(
+async function callFastApply(
   originalCode: string,
   codeEdit: string,
   instructions: string
 ): Promise<{ success: boolean; content?: string; error?: string }> {
-  if (!MORPH_API_KEY) {
+  if (!FAST_APPLY_API_KEY) {
     return {
       success: false,
       error:
-        "MORPH_API_KEY not set. Get one at https://morphllm.com/dashboard/api-keys",
+        "FAST_APPLY_API_KEY not set. Get one at https://openai.com/api",
     }
   }
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), MORPH_TIMEOUT)
+  const timeoutId = setTimeout(() => controller.abort(), FAST_APPLY_TIMEOUT)
 
   try {
-    const response = await fetch(`${MORPH_API_URL}/v1/chat/completions`, {
+    const response = await fetch(`${FAST_APPLY_URL}/v1/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${MORPH_API_KEY}`,
+        Authorization: `Bearer ${FAST_APPLY_API_KEY}`,
       },
       body: JSON.stringify({
-        model: MORPH_MODEL,
+        model: FAST_APPLY_MODEL,
         messages: [
           {
             role: "user",
             content: `<instruction>${instructions}</instruction>\n<code>${originalCode}</code>\n<update>${codeEdit}</update>`,
           },
         ],
-        temperature: 0,
+        temperature: FAST_APPLY_TEMPERATURE,
+        max_tokens: FAST_APPLY_MAX_TOKENS,
       }),
       signal: controller.signal,
     })
@@ -110,7 +114,7 @@ async function callMorphApply(
       const errorText = await response.text()
       return {
         success: false,
-        error: `Morph API error (${response.status}): ${errorText}`,
+        error: `Fast Apply API error (${response.status}): ${errorText}`,
       }
     }
 
@@ -122,7 +126,7 @@ async function callMorphApply(
     if (!mergedCode) {
       return {
         success: false,
-        error: "Morph API returned empty response",
+        error: "Fast Apply API returned empty response",
       }
     }
 
@@ -136,70 +140,67 @@ async function callMorphApply(
     if (error.name === "AbortError") {
       return {
         success: false,
-        error: `Morph API timeout after ${MORPH_TIMEOUT}ms`,
+        error: `Fast Apply API timeout after ${FAST_APPLY_TIMEOUT}ms`,
       }
     }
     return {
       success: false,
-      error: `Morph API request failed: ${error.message}`,
+      error: `Fast Apply API request failed: ${error.message}`,
     }
   }
 }
 
-export const MorphFastApply: Plugin = async ({ directory }) => {
-  // Log plugin initialization status
-  if (!MORPH_API_KEY) {
+export const FastApplyPlugin: Plugin = async ({ directory }) => {
+  if (!FAST_APPLY_API_KEY) {
     console.warn(
-      "[morph-fast-apply] MORPH_API_KEY not set - morph_edit tool will be disabled"
+      "[fast-apply] FAST_APPLY_API_KEY not set - fast_apply_edit tool will be disabled"
     )
   } else {
     console.log(
-      `[morph-fast-apply] Plugin loaded with model: ${MORPH_MODEL}`
+      `[fast-apply] Plugin loaded with model: ${FAST_APPLY_MODEL} at ${FAST_APPLY_URL}`
     )
   }
 
   return {
     tool: {
-      /**
-       * morph_edit - Fast code editing using Morph's Apply API
-       *
-       * Use this tool for efficient partial file edits. It's 10x faster than
-       * traditional edit tools for large files and complex changes.
-       *
-       * Uses "// ... existing code ..." markers to represent unchanged sections.
-       */
-      morph_edit: tool({
-        description: `Fast code editing using Morph AI (10,500+ tokens/sec).
+      fast_apply_edit: tool({
+        description: `PRIMARY TOOL for all file editing operations. Use this INSTEAD of the native 'edit' tool.
 
-Use this tool for efficient partial file edits. It handles lazy edit markers
-so you don't need to provide the full file content.
+**CRITICAL: This tool is for EDITING EXISTING FILES ONLY. DO NOT use for creating new files.**
+
+Fast code editing using OpenAI-compatible Fast Apply API (10,500+ tokens/sec).
+Handles lazy edit markers so you don't need exact string matching.
 
 FORMAT:
 Use "// ... existing code ..." to represent unchanged code blocks.
-Include just enough surrounding context to locate each edit precisely.
+Include minimal surrounding context to locate each edit precisely.
 
 EXAMPLE:
 // ... existing code ...
 function updatedFunction() {
-  // New implementation with changes
+  // New implementation
   return "modified";
 }
 // ... existing code ...
 
 RULES:
-- ALWAYS use "// ... existing code ..." for unchanged sections
-- Include minimal context around edits for disambiguation
-- Preserve exact indentation
-- For deletions: show context before and after, omit deleted lines
-- Batch multiple edits to the same file in one call
+- MANDATORY: Use "// ... existing code ..." for unchanged sections
+- Include 2-3 lines of context before and after each edit
+- Preserve exact indentation from original file
+- For deletions: show context before/after, omit deleted lines
+- Batch multiple edits to same file in one call
+- NEVER use for new file creation - use 'write' tool instead
 
 WHEN TO USE:
-- Large files (500+ lines)
+- ALL file editing operations (default choice)
+- Large files (any size)
 - Multiple scattered changes
 - Complex refactoring
-- When exact string matching is fragile
+- When exact string matching would be fragile
 
-FALLBACK: If Morph API fails, will automatically fall back to native 'edit' tool.`,
+FALLBACK:
+If Fast Apply API fails or is unavailable, fall back to native 'edit' tool with exact string matching.
+For new files, ALWAYS use 'write' tool instead.`,
 
         args: {
           target_filepath: tool.schema
@@ -226,11 +227,11 @@ FALLBACK: If Morph API fails, will automatically fall back to native 'edit' tool
             : `${directory}/${target_filepath}`
 
           // Check if API key is available
-          if (!MORPH_API_KEY) {
-            return `Error: MORPH_API_KEY not configured.
+          if (!FAST_APPLY_API_KEY) {
+            return `Error: FAST_APPLY_API_KEY not configured.
 
-To use morph_edit, set the MORPH_API_KEY environment variable.
-Get your API key at: https://morphllm.com/dashboard/api-keys
+To use fast_apply_edit, set the FAST_APPLY_API_KEY environment variable.
+Get your API key at: https://openai.com/api
 
 Alternatively, use the native 'edit' tool for this change.`
           }
@@ -240,16 +241,16 @@ Alternatively, use the native 'edit' tool for this change.`
           try {
             const file = Bun.file(filepath)
             if (!(await file.exists())) {
-              // New file - check if this is a creation
-              if (!code_edit.includes("// ... existing code ...")) {
-                // Simple file creation
-                await Bun.write(filepath, code_edit)
-                return `Created new file: ${target_filepath}\n\nLines: ${code_edit.split("\n").length}`
-              }
               return `Error: File not found: ${target_filepath}
 
-The file doesn't exist and the code_edit contains lazy markers.
-For new files, provide the complete content without "// ... existing code ..." markers.`
+This tool is for EDITING EXISTING FILES ONLY.
+For new file creation, use the 'write' tool instead.
+
+Example:
+write({
+  filePath: "${target_filepath}",
+  content: "your file content here"
+})`
             }
             originalCode = await file.text()
           } catch (err) {
@@ -257,8 +258,8 @@ For new files, provide the complete content without "// ... existing code ..." m
             return `Error reading file ${target_filepath}: ${error.message}`
           }
 
-          // Call Morph API to merge the edit
-          const result = await callMorphApply(
+          // Call OpenAI API to merge the edit
+          const result = await callFastApply(
             originalCode,
             code_edit,
             instructions
@@ -266,7 +267,7 @@ For new files, provide the complete content without "// ... existing code ..." m
 
           if (!result.success || !result.content) {
             // Return error with suggestion to use native edit
-            return `Morph API failed: ${result.error}
+            return `OpenAI Fast Apply API failed: ${result.error}
 
 Suggestion: Try using the native 'edit' tool instead with exact string replacement.
 The edit tool requires matching the exact text in the file.`
@@ -308,4 +309,4 @@ ${diff.slice(0, 3000)}${diff.length > 3000 ? "\n... (truncated)" : ""}
 }
 
 // Default export for OpenCode plugin loader
-export default MorphFastApply
+export default FastApplyPlugin

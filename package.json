@@ -1,7 +1,7 @@
 {
-  "name": "opencode-morph-fast-apply",
-  "version": "1.1.0",
-  "description": "OpenCode plugin for Morph Fast Apply - 10x faster code editing",
+  "name": "opencode-fast-apply",
+  "version": "2.0.0",
+  "description": "OpenCode plugin for Fast Apply - 10x faster code editing with OpenAI-compatible APIs (LM Studio, Ollama)",
   "type": "module",
   "main": "index.ts",
   "scripts": {
@@ -19,14 +19,16 @@
   "keywords": [
     "opencode",
     "plugin",
-    "morph",
     "fast-apply",
-    "code-editing"
+    "code-editing",
+    "openai",
+    "lm-studio",
+    "ollama"
   ],
-  "author": "JRedeker",
+  "author": "tickernelz",
   "repository": {
     "type": "git",
-    "url": "https://github.com/JRedeker/opencode-morph-fast-apply.git"
+    "url": "https://github.com/tickernelz/opencode-fast-apply.git"
   },
   "license": "MIT"
 }
