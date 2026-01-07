@@ -21,14 +21,18 @@ const FAST_APPLY_TIMEOUT = parseInt(process.env.FAST_APPLY_TIMEOUT || "30000", 1
 const FAST_APPLY_TEMPERATURE = parseFloat(process.env.FAST_APPLY_TEMPERATURE || "0.05")
 const FAST_APPLY_MAX_TOKENS = parseInt(process.env.FAST_APPLY_MAX_TOKENS || "8000", 10)
 
-const FAST_APPLY_SYSTEM_PROMPT = "Merge code edits into original files. Preserve structure, indentation, and comments exactly."
+const FAST_APPLY_SYSTEM_PROMPT = "You are a coding assistant that helps merge code updates, ensuring every modification is fully integrated."
 
-const FAST_APPLY_USER_PROMPT = `Task: {instruction}
+const FAST_APPLY_USER_PROMPT = `Merge all changes from the <update> snippet into the <code> below.
+- Preserve the code's structure, order, comments, and indentation exactly.
+- Output only the updated code, enclosed within <updated-code> and </updated-code> tags.
+- Do not include any additional text, explanations, placeholders, ellipses, or code fences.
 
 <code>{original_code}</code>
+
 <update>{update_snippet}</update>
 
-Output complete merged code in <updated-code></updated-code> tags. No explanations, markdown, or ellipses.`
+Provide the complete updated code.`
 
 const UPDATED_CODE_START = "<updated-code>"
 const UPDATED_CODE_END = "</updated-code>"
@@ -115,10 +119,23 @@ function unescapeXmlTags(text: string): string {
 
 function extractUpdatedCode(raw: string): string {
   const stripped = raw.trim()
-  const start = stripped.indexOf(UPDATED_CODE_START)
-  const end = stripped.lastIndexOf(UPDATED_CODE_END)
+  const startTag = UPDATED_CODE_START
+  const endTag = UPDATED_CODE_END
   
-  if (start === -1 || end === -1 || end <= start) {
+  let startIdx = stripped.indexOf(startTag)
+  if (startIdx === -1) {
+    startIdx = stripped.indexOf("<updated-code")
+    if (startIdx !== -1) {
+      const closeTagIdx = stripped.indexOf(">", startIdx)
+      if (closeTagIdx !== -1) {
+        startIdx = closeTagIdx + 1
+      }
+    }
+  } else {
+    startIdx += startTag.length
+  }
+  
+  if (startIdx === -1 || startIdx === startTag.length - 1) {
     if (stripped.startsWith("```") && stripped.endsWith("```")) {
       const lines = stripped.split("\n")
       if (lines.length >= 2) {
@@ -128,7 +145,21 @@ function extractUpdatedCode(raw: string): string {
     return unescapeXmlTags(stripped)
   }
   
-  const inner = stripped.substring(start + UPDATED_CODE_START.length, end)
+  let endIdx = stripped.indexOf(endTag, startIdx)
+  if (endIdx === -1) {
+    endIdx = stripped.indexOf("</updated-code", startIdx)
+  }
+  
+  if (endIdx === -1) {
+    const extracted = stripped.slice(startIdx).trim()
+    const lastCloseTag = extracted.lastIndexOf("</")
+    if (lastCloseTag !== -1 && extracted.slice(lastCloseTag).toLowerCase().includes("update")) {
+      return unescapeXmlTags(extracted.slice(0, lastCloseTag).trim())
+    }
+    return unescapeXmlTags(extracted)
+  }
+  
+  const inner = stripped.substring(startIdx, endIdx)
   if (!inner || inner.trim().length === 0) {
     throw new Error("Empty updated-code block")
   }
@@ -262,7 +293,6 @@ async function callFastApply(
     const escapedCodeEdit = escapeXmlTags(codeEdit)
     
     const userContent = FAST_APPLY_USER_PROMPT
-      .replace("{instruction}", instructions || "Apply the requested code changes.")
       .replace("{original_code}", escapedOriginalCode)
       .replace("{update_snippet}", escapedCodeEdit)
 
