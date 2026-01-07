@@ -30,23 +30,19 @@ const FAST_APPLY_TEMPERATURE = parseFloat(process.env.FAST_APPLY_TEMPERATURE || 
 
 const FAST_APPLY_SYSTEM_PROMPT = "You are a coding assistant that helps merge code updates, ensuring every modification is fully integrated."
 
-const FAST_APPLY_USER_PROMPT = `Merge all changes from the UPDATE_BLOCK into the ORIGINAL_BLOCK below.
+const FAST_APPLY_USER_PROMPT = `Merge all changes from the <update> snippet into the <code> below.
 - Preserve the code's structure, order, comments, and indentation exactly.
-- Output only the updated code, enclosed within <<<RESULT>>> and <<<END_RESULT>>> delimiters.
+- Output only the updated code, enclosed within <updated-code> and </updated-code> tags.
 - Do not include any additional text, explanations, placeholders, ellipses, or code fences.
 
-<<<ORIGINAL_CODE>>>
-{original_code}
-<<<END_ORIGINAL>>>
+<code>{original_code}</code>
 
-<<<UPDATE_CODE>>>
-{update_snippet}
-<<<END_UPDATE>>>
+<update>{update_snippet}</update>
 
-Provide the complete updated code wrapped in <<<RESULT>>> and <<<END_RESULT>>>.`
+Provide the complete updated code.`
 
-const UPDATED_CODE_START = "<<<RESULT>>>"
-const UPDATED_CODE_END = "<<<END_RESULT>>>"
+const UPDATED_CODE_START = "<updated-code>"
+const UPDATED_CODE_END = "</updated-code>"
 
 const TOOL_INSTRUCTIONS = `**DEFAULT tool for editing existing files. Use INSTEAD of native 'edit' tool.**
 
@@ -116,6 +112,18 @@ function alsoKeepThis() {
 ## Fallback
 If API fails, use native \`edit\` tool with exact string matching.`
 
+function escapeXmlTags(text: string): string {
+  return text
+    .replace(/<updated-code>/g, "&lt;updated-code&gt;")
+    .replace(/<\/updated-code>/g, "&lt;/updated-code&gt;")
+}
+
+function unescapeXmlTags(text: string): string {
+  return text
+    .replace(/&lt;updated-code&gt;/g, "<updated-code>")
+    .replace(/&lt;\/updated-code&gt;/g, "</updated-code>")
+}
+
 function extractUpdatedCode(raw: string): string {
   const stripped = raw.trim()
   const startTag = UPDATED_CODE_START
@@ -123,11 +131,11 @@ function extractUpdatedCode(raw: string): string {
 
   let startIdx = stripped.indexOf(startTag)
   if (startIdx === -1) {
-    startIdx = stripped.indexOf("<<<RESULT")
+    startIdx = stripped.indexOf("<updated-code")
     if (startIdx !== -1) {
-      const closeTagIdx = stripped.indexOf(">>>", startIdx)
+      const closeTagIdx = stripped.indexOf(">", startIdx)
       if (closeTagIdx !== -1) {
-        startIdx = closeTagIdx + 3
+        startIdx = closeTagIdx + 1
       }
     }
   } else {
@@ -138,32 +146,32 @@ function extractUpdatedCode(raw: string): string {
     if (stripped.startsWith("```") && stripped.endsWith("```")) {
       const lines = stripped.split("\n")
       if (lines.length >= 2) {
-        return lines.slice(1, -1).join("\n")
+        return unescapeXmlTags(lines.slice(1, -1).join("\n"))
       }
     }
-    return stripped
+    return unescapeXmlTags(stripped)
   }
 
   let endIdx = stripped.indexOf(endTag, startIdx)
   if (endIdx === -1) {
-    endIdx = stripped.indexOf("<<<END_RESULT", startIdx)
+    endIdx = stripped.indexOf("</updated-code", startIdx)
   }
 
   if (endIdx === -1) {
     const extracted = stripped.slice(startIdx).trim()
-    const lastCloseTag = extracted.lastIndexOf("<<<")
-    if (lastCloseTag !== -1 && extracted.slice(lastCloseTag).toLowerCase().includes("end")) {
-      return extracted.slice(0, lastCloseTag).trim()
+    const lastCloseTag = extracted.lastIndexOf("</")
+    if (lastCloseTag !== -1 && extracted.slice(lastCloseTag).toLowerCase().includes("update")) {
+      return unescapeXmlTags(extracted.slice(0, lastCloseTag).trim())
     }
-    return extracted
+    return unescapeXmlTags(extracted)
   }
 
   const inner = stripped.substring(startIdx, endIdx)
   if (!inner || inner.trim().length === 0) {
-    throw new Error("Empty result block")
+    throw new Error("Empty updated-code block")
   }
 
-  return inner
+  return unescapeXmlTags(inner)
 }
 
 function generateUnifiedDiff(
@@ -280,9 +288,12 @@ async function callFastApply(
   }
 
   try {
+    const escapedOriginalCode = escapeXmlTags(originalCode)
+    const escapedCodeEdit = escapeXmlTags(codeEdit)
+
     const userContent = FAST_APPLY_USER_PROMPT
-      .replace("{original_code}", originalCode)
-      .replace("{update_snippet}", codeEdit)
+      .replace("{original_code}", escapedOriginalCode)
+      .replace("{update_snippet}", escapedCodeEdit)
 
     const response = await fetch(`${FAST_APPLY_URL}/v1/chat/completions`, {
       method: "POST",

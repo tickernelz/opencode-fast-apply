@@ -9,8 +9,8 @@ OpenCode plugin for Fast Apply - High-performance code editing with OpenAI-compa
 - **Unified diff output** with context for easy review
 - **Graceful fallback** - suggests native `edit` tool on API failure
 - **Multi-backend support** - LM Studio, Ollama, OpenAI, and any OpenAI-compatible endpoint
-- **Robust delimiter system** - uses unique `<<<RESULT>>>` delimiters to prevent tag conflicts
-- **Zero escaping overhead** - no XML tag processing needed, handles all code patterns safely
+- **Robust XML tag handling** - safely handles code containing `<updated-code>` tags
+- **Special character support** - preserves all string literals, regex patterns, and escape sequences
 
 ## Installation
 
@@ -103,13 +103,12 @@ function validateToken(token) {
 ## How It Works
 
 1. Reads the original file content
-2. Sends system prompt + user prompt with `<<<ORIGINAL_CODE>>>`, `<<<UPDATE_CODE>>>`, and `<<<RESULT>>>` delimiters to OpenAI-compatible API
-3. API intelligently merges the lazy edit markers with original code
-4. Extracts result from `<<<RESULT>>>` and `<<<END_RESULT>>>` delimiters
-5. Writes the merged result back to the file
-6. Returns a unified diff showing what changed
-
-**Delimiter Design:** Uses unique triple-angle-bracket delimiters (`<<<RESULT>>>`) that are extremely unlikely to appear in source code, eliminating tag conflict issues entirely without any escaping overhead.
+2. Escapes XML tags in code to prevent conflicts
+3. Sends system prompt + user prompt with `<instruction>`, `<code>`, and `<update>` to OpenAI-compatible API
+4. API intelligently merges the lazy edit markers with original code
+5. Extracts result from `<updated-code>` tags and unescapes XML
+6. Writes the merged result back to the file
+7. Returns a unified diff showing what changed
 
 ## Performance
 
@@ -137,8 +136,7 @@ Performance varies based on your setup:
 
 ## Edge Cases Handled
 
-- ✅ Code containing XML-like tags (`<update>`, `<code>`, `<result>`) in strings
-- ✅ Code containing triple-angle-bracket patterns in comments or strings
+- ✅ String literals containing `<updated-code>` tags
 - ✅ Multiple XML-like tags in regex patterns
 - ✅ Special characters (quotes, backslashes, unicode, SQL, HTML entities)
 - ✅ Large files (500+ lines)
@@ -146,7 +144,6 @@ Performance varies based on your setup:
 - ✅ Complex nested structures
 - ✅ Template strings with `${variable}`
 - ✅ Whitespace and indentation preservation
-- ✅ No escaping overhead - delimiter system prevents all tag conflicts
 
 ## Troubleshooting
 
