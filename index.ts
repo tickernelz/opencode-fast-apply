@@ -26,152 +26,121 @@ const sessionParamsCache = new Map<string, SessionParams>()
 const FAST_APPLY_API_KEY = process.env.FAST_APPLY_API_KEY || "optional-api-key"
 const FAST_APPLY_URL = (process.env.FAST_APPLY_URL || "http://localhost:1234/v1").replace(/\/v1\/?$/, "")
 const FAST_APPLY_MODEL = process.env.FAST_APPLY_MODEL || "fastapply-1.5b"
-const FAST_APPLY_TEMPERATURE = parseFloat(process.env.FAST_APPLY_TEMPERATURE || "0.05")
 
-const FAST_APPLY_SYSTEM_PROMPT = "You are a coding assistant that helps merge code updates, ensuring every modification is fully integrated."
+const FAST_APPLY_SYSTEM_PROMPT = `You are a precise code merging assistant. Your role:
+1. Merge updates while preserving all original structure and formatting
+2. Output ONLY valid code within specified XML tags
+3. Never add explanations or text outside tags
+4. Preserve all escaped XML entities exactly as provided
+5. Ensure output is syntactically valid and complete`
 
-const FAST_APPLY_USER_PROMPT = `Merge all changes from the <update> snippet into the <code> below.
-- Preserve the code's structure, order, comments, and indentation exactly.
-- Output only the updated code, enclosed within <updated-code> and </updated-code> tags.
-- Do not include any additional text, explanations, placeholders, ellipses, or code fences.
+const FAST_APPLY_USER_PROMPT = `Merge <update> into <code> and output the complete merged file.
+
+RULES:
+- Preserve: structure, order, comments, indentation, escaped entities
+- Output: entire file within <updated-code></updated-code> tags only
+- Forbidden: explanations, placeholders, ellipses, code fences, nested tags
+- Validation: ensure syntactically valid, complete code
 
 <code>{original_code}</code>
 
 <update>{update_snippet}</update>
 
-Provide the complete updated code.`
+Output complete merged code:`
 
-const UPDATED_CODE_START = "<updated-code>"
-const UPDATED_CODE_END = "</updated-code>"
-
-const TOOL_INSTRUCTIONS = `**DEFAULT tool for editing existing files. Use INSTEAD of native 'edit' tool.**
+const TOOL_INSTRUCTIONS = `DEFAULT tool for editing existing files. Use INSTEAD of native 'edit' tool.
 
 CRITICAL: For EXISTING files ONLY. Use 'write' for new files.
 
-## Priority
-1. \`fast_apply_edit\` - ALL file edits (default)
-2. \`edit\` - Fallback if API fails
-3. \`write\` - NEW files only
+PRIORITY:
+1. fast_apply_edit - ALL file edits (default, 10x faster)
+2. edit - Fallback if API fails
+3. write - NEW files only
 
-## Format
-Use \`// ... existing code ...\` for unchanged sections:
-
+FORMAT:
+Use \`// ... existing code ...\` markers for unchanged sections:
 \`\`\`
 // ... existing code ...
-function updated() {
-  return "modified";
-}
+function updated() { return "modified"; }
 // ... existing code ...
 \`\`\`
 
-## Rules
+RULES:
 - MANDATORY: Use \`// ... existing code ...\` markers
 - Include 2-3 lines context before/after edits
 - Preserve exact indentation
-- ONE edit block per call (multiple blocks = suboptimal results)
+- ONE edit block per call (multiple blocks = suboptimal)
 - Deletions: show context, omit deleted lines
-- NEVER for new files
 
-## Examples
-
-**Add function:**
-\`\`\`
-// ... existing code ...
-import { newDep } from './newDep';
-// ... existing code ...
-
-function newFeature() {
-  return newDep.process();
-}
-// ... existing code ...
-\`\`\`
-
-**Modify:**
-\`\`\`
-// ... existing code ...
-function existingFunc(param) {
-  const result = param * 2;
-  return result;
-}
-// ... existing code ...
-\`\`\`
-
-**Delete:**
-\`\`\`
-// ... existing code ...
-function keepThis() {
-  return "stays";
-}
-
-function alsoKeepThis() {
-  return "stays";
-}
-// ... existing code ...
-\`\`\`
-
-## Fallback
-If API fails, use native \`edit\` tool with exact string matching.`
+FALLBACK: If API fails, use native 'edit' tool with exact string matching.`
 
 function escapeXmlTags(text: string): string {
   return text
-    .replace(/<updated-code>/g, "&lt;updated-code&gt;")
-    .replace(/<\/updated-code>/g, "&lt;/updated-code&gt;")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;")
 }
 
 function unescapeXmlTags(text: string): string {
   return text
-    .replace(/&lt;updated-code&gt;/g, "<updated-code>")
-    .replace(/&lt;\/updated-code&gt;/g, "</updated-code>")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+}
+
+function validateNoNestedTags(content: string): void {
+  const unescaped = content
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+  
+  if (unescaped.includes("<updated-code>") || unescaped.includes("</updated-code>")) {
+    throw new Error("Content contains unescaped tag-like sequences that could break parsing")
+  }
+  
+  if (unescaped.includes("<code>") || unescaped.includes("</code>")) {
+    throw new Error("Content contains unescaped <code> tags that could break prompt structure")
+  }
+  
+  if (unescaped.includes("<update>") || unescaped.includes("</update>")) {
+    throw new Error("Content contains unescaped <update> tags that could break prompt structure")
+  }
 }
 
 function extractUpdatedCode(raw: string): string {
   const stripped = raw.trim()
-  const startTag = UPDATED_CODE_START
-  const endTag = UPDATED_CODE_END
-
-  let startIdx = stripped.indexOf(startTag)
-  if (startIdx === -1) {
-    startIdx = stripped.indexOf("<updated-code")
-    if (startIdx !== -1) {
-      const closeTagIdx = stripped.indexOf(">", startIdx)
-      if (closeTagIdx !== -1) {
-        startIdx = closeTagIdx + 1
-      }
-    }
-  } else {
-    startIdx += startTag.length
+  
+  const startRegex = /<updated-code\s*>/i
+  const endRegex = /<\/updated-code\s*>/i
+  
+  const startMatch = stripped.match(startRegex)
+  if (!startMatch || startMatch.index === undefined) {
+    throw new Error("Missing or malformed <updated-code> start tag in AI response")
   }
-
-  if (startIdx === -1 || startIdx === startTag.length - 1) {
-    if (stripped.startsWith("```") && stripped.endsWith("```")) {
-      const lines = stripped.split("\n")
-      if (lines.length >= 2) {
-        return unescapeXmlTags(lines.slice(1, -1).join("\n"))
-      }
-    }
-    return unescapeXmlTags(stripped)
+  
+  const startIdx = startMatch.index + startMatch[0].length
+  const remaining = stripped.slice(startIdx)
+  
+  const endMatch = remaining.match(endRegex)
+  if (!endMatch || endMatch.index === undefined) {
+    throw new Error("Missing or malformed </updated-code> end tag in AI response")
   }
-
-  let endIdx = stripped.indexOf(endTag, startIdx)
-  if (endIdx === -1) {
-    endIdx = stripped.indexOf("</updated-code", startIdx)
+  
+  const endIdx = endMatch.index
+  const inner = remaining.slice(0, endIdx)
+  
+  if (!inner.trim()) {
+    throw new Error("Empty updated-code block in AI response")
   }
-
-  if (endIdx === -1) {
-    const extracted = stripped.slice(startIdx).trim()
-    const lastCloseTag = extracted.lastIndexOf("</")
-    if (lastCloseTag !== -1 && extracted.slice(lastCloseTag).toLowerCase().includes("update")) {
-      return unescapeXmlTags(extracted.slice(0, lastCloseTag).trim())
-    }
-    return unescapeXmlTags(extracted)
-  }
-
-  const inner = stripped.substring(startIdx, endIdx)
-  if (!inner || inner.trim().length === 0) {
-    throw new Error("Empty updated-code block")
-  }
-
-  return unescapeXmlTags(inner)
+  
+  const unescaped = unescapeXmlTags(inner)
+  
+  validateNoNestedTags(unescaped)
+  
+  return unescaped
 }
 
 function generateUnifiedDiff(
@@ -313,7 +282,7 @@ async function callFastApply(
             content: userContent,
           },
         ],
-        temperature: FAST_APPLY_TEMPERATURE,
+        temperature: 0,
       }),
     })
 
@@ -337,11 +306,18 @@ async function callFastApply(
       }
     }
 
-    const mergedCode = extractUpdatedCode(rawResponse)
-
-    return {
-      success: true,
-      content: mergedCode,
+    try {
+      const mergedCode = extractUpdatedCode(rawResponse)
+      return {
+        success: true,
+        content: mergedCode,
+      }
+    } catch (parseError) {
+      const error = parseError as Error
+      return {
+        success: false,
+        error: `Failed to parse AI response: ${error.message}`,
+      }
     }
   } catch (err) {
     const error = err as Error
