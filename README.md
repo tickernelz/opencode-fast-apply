@@ -24,21 +24,21 @@ npm install
 
 For **LM Studio** (default):
 ```bash
-export FAST_APPLY_URL="http://localhost:1234/v1"
+export FAST_APPLY_URL="http://localhost:1234"
 export FAST_APPLY_MODEL="fastapply-1.5b"
 export FAST_APPLY_API_KEY="optional-api-key"
 ```
 
 For **Ollama**:
 ```bash
-export FAST_APPLY_URL="http://localhost:11434/v1"
+export FAST_APPLY_URL="http://localhost:11434"
 export FAST_APPLY_MODEL="codellama:7b"
 export FAST_APPLY_API_KEY="optional-api-key"
 ```
 
 For **OpenAI**:
 ```bash
-export FAST_APPLY_URL="https://api.openai.com/v1"
+export FAST_APPLY_URL="https://api.openai.com"
 export FAST_APPLY_MODEL="gpt-4"
 export FAST_APPLY_API_KEY="sk-your-openai-key"
 ```
