@@ -1,14 +1,16 @@
 # opencode-fast-apply
 
-OpenCode plugin for Fast Apply - 10x faster code editing with OpenAI-compatible APIs (LM Studio, Ollama).
+OpenCode plugin for Fast Apply - High-performance code editing with OpenAI-compatible APIs (LM Studio, Ollama).
 
 ## Features
 
-- **10,500+ tokens/sec** code editing via OpenAI-compatible Fast Apply API
+- **High-speed code editing** via OpenAI-compatible Fast Apply API (speed depends on your hardware and model)
 - **Lazy edit markers** (`// ... existing code ...`) - no exact string matching needed
 - **Unified diff output** with context for easy review
 - **Graceful fallback** - suggests native `edit` tool on API failure
 - **Multi-backend support** - LM Studio, Ollama, OpenAI, and any OpenAI-compatible endpoint
+- **Robust XML tag handling** - safely handles code containing `<updated-code>` tags
+- **Special character support** - preserves all string literals, regex patterns, and escape sequences
 
 ## Installation
 
@@ -24,24 +26,26 @@ npm install
 
 For **LM Studio** (default):
 ```bash
-export FAST_APPLY_URL="http://localhost:1234"
+export FAST_APPLY_URL="http://localhost:1234/v1"
 export FAST_APPLY_MODEL="fastapply-1.5b"
 export FAST_APPLY_API_KEY="optional-api-key"
 ```
 
 For **Ollama**:
 ```bash
-export FAST_APPLY_URL="http://localhost:11434"
+export FAST_APPLY_URL="http://localhost:11434/v1"
 export FAST_APPLY_MODEL="codellama:7b"
 export FAST_APPLY_API_KEY="optional-api-key"
 ```
 
 For **OpenAI**:
 ```bash
-export FAST_APPLY_URL="https://api.openai.com"
+export FAST_APPLY_URL="https://api.openai.com/v1"
 export FAST_APPLY_MODEL="gpt-4"
 export FAST_APPLY_API_KEY="sk-your-openai-key"
 ```
+
+**Note:** The plugin automatically handles URLs with or without `/v1` suffix.
 
 ### 3. Add the plugin to your OpenCode config
 
@@ -117,17 +121,69 @@ function validateToken(token) {
 ## How It Works
 
 1. Reads the original file content
-2. Sends `<instruction>`, `<code>`, and `<update>` to OpenAI-compatible API
-3. API intelligently merges the lazy edit markers with original code
-4. Writes the merged result back to the file
-5. Returns a unified diff showing what changed
+2. Escapes XML tags in code to prevent conflicts
+3. Sends system prompt + user prompt with `<instruction>`, `<code>`, and `<update>` to OpenAI-compatible API
+4. API intelligently merges the lazy edit markers with original code
+5. Extracts result from `<updated-code>` tags and unescapes XML
+6. Writes the merged result back to the file
+7. Returns a unified diff showing what changed
+
+## Performance
+
+Performance varies based on your setup:
+
+| Setup | Estimated Speed | Hardware Requirement |
+|-------|----------------|---------------------|
+| fastapply-1.5b (Q4) + RTX 4090 | 10,000-15,000 tok/s | High-end GPU |
+| codellama:7b (Q4) + RTX 3060 | 3,000-5,000 tok/s | Mid-range GPU |
+| codellama:7b (Q4) + CPU only | 50-200 tok/s | Modern CPU |
+| OpenAI GPT-4 API | 100-500 tok/s | Network dependent |
+
+**Factors affecting performance:**
+- Model size (1.5B vs 7B vs 13B+ parameters)
+- Quantization level (Q4 vs Q5 vs Q8 vs FP16)
+- Hardware (GPU VRAM, CPU cores, RAM)
+- Backend optimization (LM Studio vs Ollama)
 
 ## Supported Backends
 
-- **LM Studio** - Local inference server
-- **Ollama** - Local LLM runtime
-- **OpenAI** - Cloud API
-- **Any OpenAI-compatible endpoint** - Custom servers
+- **LM Studio** - Local inference server with GPU acceleration
+- **Ollama** - Local LLM runtime with easy model management
+- **OpenAI** - Cloud API with high reliability
+- **Any OpenAI-compatible endpoint** - Custom servers and providers
+
+## Edge Cases Handled
+
+- ✅ String literals containing `<updated-code>` tags
+- ✅ Multiple XML-like tags in regex patterns
+- ✅ Special characters (quotes, backslashes, unicode, SQL, HTML entities)
+- ✅ Large files (500+ lines)
+- ✅ Multiple scattered changes in single edit
+- ✅ Complex nested structures
+- ✅ Template strings with `${variable}`
+- ✅ Whitespace and indentation preservation
+
+## Troubleshooting
+
+### API Connection Issues
+```bash
+# Test your endpoint
+curl -X POST http://localhost:1234/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"fastapply-1.5b","messages":[{"role":"user","content":"test"}]}'
+```
+
+### Slow Performance
+- Use smaller models (1.5B-3B parameters)
+- Enable GPU acceleration in LM Studio/Ollama
+- Use Q4 quantization for faster inference
+- Increase `FAST_APPLY_MAX_TOKENS` if responses are truncated
+
+### Timeout Errors
+```bash
+# Increase timeout for slower hardware
+export FAST_APPLY_TIMEOUT="60000"  # 60 seconds
+```
 
 ## Contributing
 

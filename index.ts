@@ -13,24 +13,71 @@ import { createTwoFilesPatch } from "diff"
 
 // Get API key from environment (set in mcpm/jarvis config)
 const FAST_APPLY_API_KEY = process.env.FAST_APPLY_API_KEY || "optional-api-key"
-const FAST_APPLY_URL = process.env.FAST_APPLY_URL || "http://localhost:1234/v1"
+const FAST_APPLY_URL = (process.env.FAST_APPLY_URL || "http://localhost:1234/v1").replace(/\/v1\/?$/, "")
 const FAST_APPLY_MODEL = process.env.FAST_APPLY_MODEL || "fastapply-1.5b"
 const FAST_APPLY_TIMEOUT = parseInt(process.env.FAST_APPLY_TIMEOUT || "30000", 10)
 const FAST_APPLY_TEMPERATURE = parseFloat(process.env.FAST_APPLY_TEMPERATURE || "0.05")
 const FAST_APPLY_MAX_TOKENS = parseInt(process.env.FAST_APPLY_MAX_TOKENS || "8000", 10)
 
-/** Plugin version */
 const PLUGIN_VERSION = "2.0.0"
 
-/**
- * Generate a unified diff with context for display
- */
+const FAST_APPLY_SYSTEM_PROMPT = "You are a coding assistant that helps merge code updates, ensuring every modification is fully integrated."
+
+const FAST_APPLY_USER_PROMPT = `Merge all changes from the <update> snippet into the <code> below.
+Instruction: {instruction}
+- Preserve the code's structure, order, comments, and indentation exactly.
+- Output only the updated code, enclosed within <updated-code> and </updated-code> tags.
+- Do not include any additional text, explanations, placeholders, markdown, ellipses, or code fences.
+
+<code>{original_code}</code>
+
+<update>{update_snippet}</update>
+
+Provide the complete updated code.`
+
+const UPDATED_CODE_START = "<updated-code>"
+const UPDATED_CODE_END = "</updated-code>"
+
+function escapeXmlTags(text: string): string {
+  return text
+    .replace(/<updated-code>/g, "&lt;updated-code&gt;")
+    .replace(/<\/updated-code>/g, "&lt;/updated-code&gt;")
+}
+
+function unescapeXmlTags(text: string): string {
+  return text
+    .replace(/&lt;updated-code&gt;/g, "<updated-code>")
+    .replace(/&lt;\/updated-code&gt;/g, "</updated-code>")
+}
+
+function extractUpdatedCode(raw: string): string {
+  const stripped = raw.trim()
+  const start = stripped.indexOf(UPDATED_CODE_START)
+  const end = stripped.lastIndexOf(UPDATED_CODE_END)
+  
+  if (start === -1 || end === -1 || end <= start) {
+    if (stripped.startsWith("```") && stripped.endsWith("```")) {
+      const lines = stripped.split("\n")
+      if (lines.length >= 2) {
+        return unescapeXmlTags(lines.slice(1, -1).join("\n"))
+      }
+    }
+    return unescapeXmlTags(stripped)
+  }
+  
+  const inner = stripped.substring(start + UPDATED_CODE_START.length, end)
+  if (!inner || inner.trim().length === 0) {
+    throw new Error("Empty updated-code block")
+  }
+  
+  return unescapeXmlTags(inner)
+}
+
 function generateUnifiedDiff(
   filepath: string,
   original: string,
   modified: string
 ): string {
-  // Use proper unified diff with 3 lines of context
   const patch = createTwoFilesPatch(
     `a/${filepath}`,
     `b/${filepath}`,
@@ -40,12 +87,9 @@ function generateUnifiedDiff(
     "",
     { context: 3 }
   )
-
-  // If no changes, return early
   if (!patch.includes("@@")) {
     return "No changes detected"
   }
-
   return patch
 }
 
@@ -88,6 +132,14 @@ async function callFastApply(
   const timeoutId = setTimeout(() => controller.abort(), FAST_APPLY_TIMEOUT)
 
   try {
+    const escapedOriginalCode = escapeXmlTags(originalCode)
+    const escapedCodeEdit = escapeXmlTags(codeEdit)
+    
+    const userContent = FAST_APPLY_USER_PROMPT
+      .replace("{instruction}", instructions || "Apply the requested code changes.")
+      .replace("{original_code}", escapedOriginalCode)
+      .replace("{update_snippet}", escapedCodeEdit)
+
     const response = await fetch(`${FAST_APPLY_URL}/v1/chat/completions`, {
       method: "POST",
       headers: {
@@ -98,8 +150,12 @@ async function callFastApply(
         model: FAST_APPLY_MODEL,
         messages: [
           {
+            role: "system",
+            content: FAST_APPLY_SYSTEM_PROMPT,
+          },
+          {
             role: "user",
-            content: `<instruction>${instructions}</instruction>\n<code>${originalCode}</code>\n<update>${codeEdit}</update>`,
+            content: userContent,
           },
         ],
         temperature: FAST_APPLY_TEMPERATURE,
@@ -121,14 +177,16 @@ async function callFastApply(
     const result = (await response.json()) as {
       choices: Array<{ message: { content: string } }>
     }
-    const mergedCode = result.choices?.[0]?.message?.content
+    const rawResponse = result.choices?.[0]?.message?.content
 
-    if (!mergedCode) {
+    if (!rawResponse) {
       return {
         success: false,
         error: "Fast Apply API returned empty response",
       }
     }
+
+    const mergedCode = extractUpdatedCode(rawResponse)
 
     return {
       success: true,
