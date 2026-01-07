@@ -21,8 +21,6 @@ const FAST_APPLY_TIMEOUT = parseInt(process.env.FAST_APPLY_TIMEOUT || "30000", 1
 const FAST_APPLY_TEMPERATURE = parseFloat(process.env.FAST_APPLY_TEMPERATURE || "0.05")
 const FAST_APPLY_MAX_TOKENS = parseInt(process.env.FAST_APPLY_MAX_TOKENS || "8000", 10)
 
-const PLUGIN_VERSION = "2.0.0"
-
 const FAST_APPLY_SYSTEM_PROMPT = "Merge code edits into original files. Preserve structure, indentation, and comments exactly."
 
 const FAST_APPLY_USER_PROMPT = `Task: {instruction}
@@ -175,6 +173,74 @@ function countChanges(diff: string): { added: number; removed: number } {
   }
 
   return { added, removed }
+}
+
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1000) {
+    return `${(tokens / 1000).toFixed(1)}K`.replace(".0K", "K")
+  }
+  return tokens.toString()
+}
+
+function shortenPath(filePath: string, workingDir: string): string {
+  if (filePath.startsWith(workingDir + "/")) {
+    return filePath.slice(workingDir.length + 1)
+  }
+  if (filePath === workingDir) {
+    return "."
+  }
+  return filePath
+}
+
+function truncate(str: string, maxLen: number = 80): string {
+  if (str.length <= maxLen) return str
+  return str.slice(0, maxLen - 3) + "..."
+}
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4)
+}
+
+function formatFastApplyResult(
+  filePath: string,
+  workingDir: string,
+  insertions: number,
+  deletions: number,
+  diffPreview: string,
+  modifiedTokens: number
+): string {
+  const shortPath = shortenPath(filePath, workingDir)
+  const tokenStr = formatTokenCount(modifiedTokens)
+  
+  const diffLines = diffPreview.split("\n")
+  const previewLines = diffLines.slice(0, 10)
+  const truncatedDiff = previewLines.join("\n")
+  const hasMore = diffLines.length > 10
+  
+  const lines = [
+    "✓ Fast Apply complete",
+    "",
+    "Applied changes:",
+    `→ ${shortPath}`,
+    `  +${insertions} lines, -${deletions} lines (~${tokenStr} tokens modified)`,
+    "",
+    "Diff preview (first 10 lines):",
+    truncatedDiff + (hasMore ? "\n..." : "")
+  ]
+  
+  return lines.join("\n")
+}
+
+function formatErrorOutput(error: string, filePath: string, workingDir: string): string {
+  const shortPath = shortenPath(filePath, workingDir)
+  return [
+    "✗ Fast Apply failed",
+    "",
+    `→ ${shortPath}`,
+    `  Error: ${truncate(error, 100)}`,
+    "",
+    "Fallback: Use native 'edit' tool with exact string matching"
+  ].join("\n")
 }
 
 /**
@@ -353,42 +419,35 @@ write({
           )
 
           if (!result.success || !result.content) {
-            // Return error with suggestion to use native edit
-            return `OpenAI Fast Apply API failed: ${result.error}
-
-Suggestion: Try using the native 'edit' tool instead with exact string replacement.
-The edit tool requires matching the exact text in the file.`
+            return formatErrorOutput(result.error || "Unknown error", target_filepath, directory)
           }
 
           const mergedCode = result.content
 
-          // Write the merged result
           try {
             await writeFile(filepath, mergedCode, "utf-8")
           } catch (err) {
             const error = err as Error
-            return `Error writing file ${target_filepath}: ${error.message}`
+            return formatErrorOutput(error.message, target_filepath, directory)
           }
 
-          // Generate unified diff
           const diff = generateUnifiedDiff(
             target_filepath,
             originalCode,
             mergedCode
           )
 
-          // Calculate change stats
           const { added, removed } = countChanges(diff)
-          const originalLines = originalCode.split("\n").length
-          const mergedLines = mergedCode.split("\n").length
+          const modifiedTokens = estimateTokens(diff)
 
-          return `Applied edit to ${target_filepath}
-
-+${added} -${removed} lines | ${originalLines} -> ${mergedLines} total
-
-\`\`\`diff
-${diff.slice(0, 3000)}${diff.length > 3000 ? "\n... (truncated)" : ""}
-\`\`\``
+          return formatFastApplyResult(
+            target_filepath,
+            directory,
+            added,
+            removed,
+            diff,
+            modifiedTokens
+          )
         },
       }),
     },
