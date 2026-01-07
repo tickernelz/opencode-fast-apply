@@ -26,7 +26,6 @@ const sessionParamsCache = new Map<string, SessionParams>()
 const FAST_APPLY_API_KEY = process.env.FAST_APPLY_API_KEY || "optional-api-key"
 const FAST_APPLY_URL = (process.env.FAST_APPLY_URL || "http://localhost:1234/v1").replace(/\/v1\/?$/, "")
 const FAST_APPLY_MODEL = process.env.FAST_APPLY_MODEL || "fastapply-1.5b"
-const FAST_APPLY_TIMEOUT = parseInt(process.env.FAST_APPLY_TIMEOUT || "30000", 10)
 const FAST_APPLY_TEMPERATURE = parseFloat(process.env.FAST_APPLY_TEMPERATURE || "0.05")
 
 const FAST_APPLY_SYSTEM_PROMPT = "You are a coding assistant that helps merge code updates, ensuring every modification is fully integrated."
@@ -288,9 +287,6 @@ async function callFastApply(
     }
   }
 
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), FAST_APPLY_TIMEOUT)
-
   try {
     const escapedOriginalCode = escapeXmlTags(originalCode)
     const escapedCodeEdit = escapeXmlTags(codeEdit)
@@ -319,10 +315,7 @@ async function callFastApply(
         ],
         temperature: FAST_APPLY_TEMPERATURE,
       }),
-      signal: controller.signal,
     })
-
-    clearTimeout(timeoutId)
 
     if (!response.ok) {
       const errorText = await response.text()
@@ -351,14 +344,7 @@ async function callFastApply(
       content: mergedCode,
     }
   } catch (err) {
-    clearTimeout(timeoutId)
     const error = err as Error
-    if (error.name === "AbortError") {
-      return {
-        success: false,
-        error: `Fast Apply API timeout after ${FAST_APPLY_TIMEOUT}ms`,
-      }
-    }
     return {
       success: false,
       error: `Fast Apply API request failed: ${error.message}`,

@@ -98,7 +98,6 @@ function validateToken(token) {
 | `FAST_APPLY_API_KEY` | `optional-api-key` | API key (optional for local servers) |
 | `FAST_APPLY_URL` | `http://localhost:1234/v1` | OpenAI-compatible API endpoint |
 | `FAST_APPLY_MODEL` | `fastapply-1.5b` | Model name |
-| `FAST_APPLY_TIMEOUT` | `30000` | Request timeout in ms |
 | `FAST_APPLY_TEMPERATURE` | `0.05` | Temperature (0.0-2.0) |
 
 ## How It Works
@@ -161,12 +160,6 @@ curl -X POST http://localhost:1234/v1/chat/completions \
 - Enable GPU acceleration in LM Studio/Ollama
 - Use Q4 quantization for faster inference
 - Increase `FAST_APPLY_MAX_TOKENS` if responses are truncated
-
-### Timeout Errors
-```bash
-# Increase timeout for slower hardware
-export FAST_APPLY_TIMEOUT="60000"  # 60 seconds
-```
 
 ## Contributing
 
