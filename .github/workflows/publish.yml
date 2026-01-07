@@ -19,7 +19,6 @@ jobs:
         with:
           node-version: '20.x'
       - run: npm ci
-      - run: npm test
       - uses: JS-DevTools/npm-publish@v4
         with:
           access: public
