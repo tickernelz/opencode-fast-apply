@@ -1,11 +1,20 @@
 {
   "name": "opencode-fast-apply",
   "version": "2.0.0",
-  "description": "OpenCode plugin for Fast Apply - 10x faster code editing with OpenAI-compatible APIs (LM Studio, Ollama)",
+  "description": "OpenCode plugin for Fast Apply - High-performance code editing with OpenAI-compatible APIs (LM Studio, Ollama)",
   "type": "module",
-  "main": "index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "FAST_APPLY_INSTRUCTIONS.md",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@opencode-ai/plugin": "latest",
@@ -13,7 +22,7 @@
   },
   "devDependencies": {
     "@types/diff": "^7.0.2",
-    "bun-types": "latest",
+    "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
   },
   "keywords": [
@@ -23,12 +32,22 @@
     "code-editing",
     "openai",
     "lm-studio",
-    "ollama"
+    "ollama",
+    "ai",
+    "code-assistant",
+    "llm"
   ],
   "author": "tickernelz",
   "repository": {
     "type": "git",
     "url": "https://github.com/tickernelz/opencode-fast-apply.git"
   },
-  "license": "MIT"
+  "bugs": {
+    "url": "https://github.com/tickernelz/opencode-fast-apply/issues"
+  },
+  "homepage": "https://github.com/tickernelz/opencode-fast-apply#readme",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

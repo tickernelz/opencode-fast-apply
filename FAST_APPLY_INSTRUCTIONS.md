@@ -1,6 +1,6 @@
 # Fast Apply - Tool Selection Guide
 
-**CRITICAL: Use `fast_apply_edit` as your PRIMARY tool for ALL file editing operations.**
+**CRITICAL: Use `fast_apply_edit` as your DEFAULT tool for ALL file editing operations.**
 
 ## Tool Selection Priority
 
@@ -10,15 +10,24 @@
 | **2nd** | `edit` | Fallback only when `fast_apply_edit` fails |
 | **3rd** | `write` | **ONLY for creating NEW files** |
 
+## Default Behavior
+
+**ALWAYS use `fast_apply_edit` for editing existing files unless:**
+- Fast Apply API is unavailable or returns error
+- You need guaranteed exact string replacement
+- The file doesn't exist yet (use `write` instead)
+
 ## Tool Selection Matrix
 
 | Situation | Tool | Reason |
 |-----------|------|--------|
-| Edit existing file (any size) | `fast_apply_edit` | Primary tool, 10x faster, handles lazy markers |
-| Large file (500+ lines) | `fast_apply_edit` | Optimal performance with partial snippets |
-| Multiple scattered changes | `fast_apply_edit` | Batch changes efficiently |
-| Complex refactoring | `fast_apply_edit` | Better accuracy with context |
-| Whitespace-sensitive edits | `fast_apply_edit` | Forgiving with formatting |
+| Edit existing file (any size) | `fast_apply_edit` | **DEFAULT**, handles lazy markers, robust |
+| Small change (1-2 lines) | `fast_apply_edit` | **DEFAULT**, no need to switch tools |
+| Large file (500+ lines) | `fast_apply_edit` | **DEFAULT**, optimal performance with partial snippets |
+| Multiple scattered changes | `fast_apply_edit` | **DEFAULT**, batch changes efficiently |
+| Complex refactoring | `fast_apply_edit` | **DEFAULT**, better accuracy with context |
+| Whitespace-sensitive edits | `fast_apply_edit` | **DEFAULT**, forgiving with formatting |
+| Special characters in code | `fast_apply_edit` | **DEFAULT**, handles XML tags, regex, etc. |
 | Fast Apply API fails | `edit` | Fallback with exact string matching |
 | **New file creation** | `write` | **NEVER use fast_apply_edit for new files** |
 
@@ -94,8 +103,10 @@ function alsoKeepThis() {
 
 If Fast Apply API fails (timeout, network error, etc.):
 1. Tool returns error message with details
-2. **Falnative `edit` tool** with exact string matching
+2. **Fallback to native `edit` tool** with exact string matching
 3. The `edit` tool requires matching exact text from the file
+
+**Note:** API failures are rare. Always try `fast_apply_edit` first.
 
 ## When to Use Native 'edit' Tool
 
@@ -108,31 +119,3 @@ If Fast Apply API fails (timeout, network error, etc.):
 - **ONLY for creating NEW files**
 - Never use `fast_apply_edit` for file creation
 - Provide complete file content without lazy markers
-
-## Configuration
-
-Ensure these environment variables are set:
-
-```bash
-# For LM Studio (default)
-export FAST_APPLY_URL="http://localhost:1234/v1"
-export FAST_APPLY_MODEL="fastapply-1.5b"
-export FAST_APPLY_API_KEY="optional-api-key"
-
-# For Ollama
-export FAST_APPLY_URL="http://localhost:11434/v1"
-export FAST_APPLY_MODEL="codellama:7b"
-
-# For OpenAI
-export FAST_APPLY_URL="https://api.openai.com/v1"
-export FAST_APPLY_MODEL="gpt-4"
-export FAST_APPLY_API_KEY="sk-your-key"
-```
-
-## Performance Benefits
-
-- **10,500+ tokens/sec** processing speed
-- No exact string matching required
-- Handles whitespace variations gracefully
-- Batch multiple edits efficiently
-- Works with files of any size

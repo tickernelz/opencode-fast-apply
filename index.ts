@@ -10,6 +10,8 @@
 
 import { type Plugin, tool } from "@opencode-ai/plugin"
 import { createTwoFilesPatch } from "diff"
+import { readFile, writeFile, access } from "fs/promises"
+import { constants } from "fs"
 
 // Get API key from environment (set in mcpm/jarvis config)
 const FAST_APPLY_API_KEY = process.env.FAST_APPLY_API_KEY || "optional-api-key"
@@ -297,8 +299,11 @@ Alternatively, use the native 'edit' tool for this change.`
           // Read the original file
           let originalCode: string
           try {
-            const file = Bun.file(filepath)
-            if (!(await file.exists())) {
+            await access(filepath, constants.R_OK)
+            originalCode = await readFile(filepath, "utf-8")
+          } catch (err) {
+            const error = err as Error
+            if (error.message.includes("ENOENT") || error.message.includes("no such file")) {
               return `Error: File not found: ${target_filepath}
 
 This tool is for EDITING EXISTING FILES ONLY.
@@ -310,9 +315,6 @@ write({
   content: "your file content here"
 })`
             }
-            originalCode = await file.text()
-          } catch (err) {
-            const error = err as Error
             return `Error reading file ${target_filepath}: ${error.message}`
           }
 
@@ -335,7 +337,7 @@ The edit tool requires matching the exact text in the file.`
 
           // Write the merged result
           try {
-            await Bun.write(filepath, mergedCode)
+            await writeFile(filepath, mergedCode, "utf-8")
           } catch (err) {
             const error = err as Error
             return `Error writing file ${target_filepath}: ${error.message}`

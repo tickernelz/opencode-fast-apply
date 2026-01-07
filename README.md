@@ -14,12 +14,20 @@ OpenCode plugin for Fast Apply - High-performance code editing with OpenAI-compa
 
 ## Installation
 
-### 1. Clone the repository
+### 1. Install from npm (Recommended)
 
 ```bash
-git clone https://github.com/tickernelz/opencode-fast-apply.git ~/dev/oc-plugins/fast-apply
-cd ~/dev/oc-plugins/fast-apply
-npm install
+npm install -g opencode-fast-apply
+```
+
+Or add to your OpenCode config to auto-install:
+
+```json
+{
+  "plugin": [
+    "opencode-fast-apply"
+  ]
+}
 ```
 
 ### 2. Configure your API endpoint
@@ -49,28 +57,28 @@ export FAST_APPLY_API_KEY="sk-your-openai-key"
 
 ### 3. Add the plugin to your OpenCode config
 
-Add to your global config (`~/.config/opencode/opencode.json`):
+**Recommended:** Add to your global config (`~/.config/opencode/opencode.json` or `opencode.jsonc`):
 
 ```json
 {
   "plugin": [
-    "/path/to/fast-apply"
-  ],
-  "instructions": [
-    "/path/to/fast-apply/FAST_APPLY_INSTRUCTIONS.md"
+    "opencode-pty",
+    "opencode-fast-apply"
   ]
 }
 ```
 
-Or in a project-local `.opencode/config.json`:
+The plugin will automatically load `FAST_APPLY_INSTRUCTIONS.md` to enable `fast_apply_edit` as the default editing tool.
+
+**Alternative (local development):** For testing local changes:
 
 ```json
 {
   "plugin": [
-    "~/dev/oc-plugins/fast-apply"
+    "/path/to/opencode-fast-apply"
   ],
   "instructions": [
-    "~/dev/oc-plugins/fast-apply/FAST_APPLY_INSTRUCTIONS.md"
+    "/path/to/opencode-fast-apply/FAST_APPLY_INSTRUCTIONS.md"
   ]
 }
 ```
