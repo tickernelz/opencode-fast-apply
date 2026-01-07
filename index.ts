@@ -23,22 +23,85 @@ const FAST_APPLY_MAX_TOKENS = parseInt(process.env.FAST_APPLY_MAX_TOKENS || "800
 
 const PLUGIN_VERSION = "2.0.0"
 
-const FAST_APPLY_SYSTEM_PROMPT = "You are a coding assistant that helps merge code updates, ensuring every modification is fully integrated."
+const FAST_APPLY_SYSTEM_PROMPT = "Merge code edits into original files. Preserve structure, indentation, and comments exactly."
 
-const FAST_APPLY_USER_PROMPT = `Merge all changes from the <update> snippet into the <code> below.
-Instruction: {instruction}
-- Preserve the code's structure, order, comments, and indentation exactly.
-- Output only the updated code, enclosed within <updated-code> and </updated-code> tags.
-- Do not include any additional text, explanations, placeholders, markdown, ellipses, or code fences.
+const FAST_APPLY_USER_PROMPT = `Task: {instruction}
 
 <code>{original_code}</code>
-
 <update>{update_snippet}</update>
 
-Provide the complete updated code.`
+Output complete merged code in <updated-code></updated-code> tags. No explanations, markdown, or ellipses.`
 
 const UPDATED_CODE_START = "<updated-code>"
 const UPDATED_CODE_END = "</updated-code>"
+
+const TOOL_INSTRUCTIONS = `**DEFAULT tool for editing existing files. Use INSTEAD of native 'edit' tool.**
+
+CRITICAL: For EXISTING files ONLY. Use 'write' for new files.
+
+## Priority
+1. \`fast_apply_edit\` - ALL file edits (default)
+2. \`edit\` - Fallback if API fails
+3. \`write\` - NEW files only
+
+## Format
+Use \`// ... existing code ...\` for unchanged sections:
+
+\`\`\`
+// ... existing code ...
+function updated() {
+  return "modified";
+}
+// ... existing code ...
+\`\`\`
+
+## Rules
+- MANDATORY: Use \`// ... existing code ...\` markers
+- Include 2-3 lines context before/after edits
+- Preserve exact indentation
+- ONE edit block per call (multiple blocks = suboptimal results)
+- Deletions: show context, omit deleted lines
+- NEVER for new files
+
+## Examples
+
+**Add function:**
+\`\`\`
+// ... existing code ...
+import { newDep } from './newDep';
+// ... existing code ...
+
+function newFeature() {
+  return newDep.process();
+}
+// ... existing code ...
+\`\`\`
+
+**Modify:**
+\`\`\`
+// ... existing code ...
+function existingFunc(param) {
+  const result = param * 2;
+  return result;
+}
+// ... existing code ...
+\`\`\`
+
+**Delete:**
+\`\`\`
+// ... existing code ...
+function keepThis() {
+  return "stays";
+}
+
+function alsoKeepThis() {
+  return "stays";
+}
+// ... existing code ...
+\`\`\`
+
+## Fallback
+If API fails, use native \`edit\` tool with exact string matching.`
 
 function escapeXmlTags(text: string): string {
   return text
@@ -224,43 +287,7 @@ export const FastApplyPlugin: Plugin = async ({ directory }) => {
   return {
     tool: {
       fast_apply_edit: tool({
-        description: `PRIMARY TOOL for all file editing operations. Use this INSTEAD of the native 'edit' tool.
-
-**CRITICAL: This tool is for EDITING EXISTING FILES ONLY. DO NOT use for creating new files.**
-
-Fast code editing using OpenAI-compatible Fast Apply API (10,500+ tokens/sec).
-Handles lazy edit markers so you don't need exact string matching.
-
-FORMAT:
-Use "// ... existing code ..." to represent unchanged code blocks.
-Include minimal surrounding context to locate each edit precisely.
-
-EXAMPLE:
-// ... existing code ...
-function updatedFunction() {
-  // New implementation
-  return "modified";
-}
-// ... existing code ...
-
-RULES:
-- MANDATORY: Use "// ... existing code ..." for unchanged sections
-- Include 2-3 lines of context before and after each edit
-- Preserve exact indentation from original file
-- For deletions: show context before/after, omit deleted lines
-- Batch multiple edits to same file in one call
-- NEVER use for new file creation - use 'write' tool instead
-
-WHEN TO USE:
-- ALL file editing operations (default choice)
-- Large files (any size)
-- Multiple scattered changes
-- Complex refactoring
-- When exact string matching would be fragile
-
-FALLBACK:
-If Fast Apply API fails or is unavailable, fall back to native 'edit' tool with exact string matching.
-For new files, ALWAYS use 'write' tool instead.`,
+        description: TOOL_INSTRUCTIONS,
 
         args: {
           target_filepath: tool.schema

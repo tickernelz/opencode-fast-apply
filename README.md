@@ -57,7 +57,7 @@ export FAST_APPLY_API_KEY="sk-your-openai-key"
 
 ### 3. Add the plugin to your OpenCode config
 
-**Recommended:** Add to your global config (`~/.config/opencode/opencode.json` or `opencode.jsonc`):
+Add to your global config (`~/.config/opencode/opencode.json` or `opencode.jsonc`):
 
 ```json
 {
@@ -68,24 +68,11 @@ export FAST_APPLY_API_KEY="sk-your-openai-key"
 }
 ```
 
-The plugin will automatically load `FAST_APPLY_INSTRUCTIONS.md` to enable `fast_apply_edit` as the default editing tool.
-
-**Alternative (local development):** For testing local changes:
-
-```json
-{
-  "plugin": [
-    "/path/to/opencode-fast-apply"
-  ],
-  "instructions": [
-    "/path/to/opencode-fast-apply/FAST_APPLY_INSTRUCTIONS.md"
-  ]
-}
-```
+**That's it!** The plugin automatically embeds all instructions - no additional configuration needed.
 
 ### 4. Restart OpenCode
 
-The `fast_apply_edit` tool will now be available.
+The `fast_apply_edit` tool will now be available and configured as the default editing tool.
 
 ## Usage
 
