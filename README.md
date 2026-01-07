@@ -9,8 +9,9 @@ OpenCode plugin for Fast Apply - High-performance code editing with OpenAI-compa
 - **Unified diff output** with context for easy review
 - **Graceful fallback** - suggests native `edit` tool on API failure
 - **Multi-backend support** - LM Studio, Ollama, OpenAI, and any OpenAI-compatible endpoint
-- **Robust delimiter system** - uses unique `<<<RESULT>>>` delimiters to prevent tag conflicts
+- **Unique delimiter system** - generates random delimiters per request (`<<<RESULT_xxxx>>>`) to eliminate parsing conflicts
 - **Zero escaping overhead** - no XML tag processing needed, handles all code patterns safely
+- **Collision-resistant parsing** - 1.6M+ unique delimiter combinations prevent conflicts with file content
 
 ## Installation
 
@@ -103,13 +104,14 @@ function validateToken(token) {
 ## How It Works
 
 1. Reads the original file content
-2. Sends system prompt + user prompt with `<<<ORIGINAL_CODE>>>`, `<<<UPDATE_CODE>>>`, and `<<<RESULT>>>` delimiters to OpenAI-compatible API
-3. API intelligently merges the lazy edit markers with original code
-4. Extracts result from `<<<RESULT>>>` and `<<<END_RESULT>>>` delimiters
-5. Writes the merged result back to the file
-6. Returns a unified diff showing what changed
+2. Generates unique random delimiters for this request (e.g., `<<<RESULT_a3f9>>>`)
+3. Sends system prompt + user prompt with unique delimiters to OpenAI-compatible API
+4. API intelligently merges the lazy edit markers with original code
+5. Extracts result using the unique delimiters with fallback pattern detection
+6. Writes the merged result back to the file
+7. Returns a unified diff showing what changed
 
-**Delimiter Design:** Uses unique triple-angle-bracket delimiters (`<<<RESULT>>>`) that are extremely unlikely to appear in source code, eliminating tag conflict issues entirely without any escaping overhead.
+**Delimiter Design:** Each request generates unique 4-character alphanumeric IDs (1,679,616 combinations) for delimiters like `<<<RESULT_xxxx>>>` and `<<<END_RESULT_xxxx>>>`. This eliminates parsing conflicts even if your code contains similar patterns. Fallback logic detects any `<<<RESULT_*>>>` pattern for maximum robustness.
 
 ## Performance
 
@@ -138,7 +140,7 @@ Performance varies based on your setup:
 ## Edge Cases Handled
 
 - ✅ Code containing XML-like tags (`<update>`, `<code>`, `<result>`) in strings
-- ✅ Code containing triple-angle-bracket patterns in comments or strings
+- ✅ Code containing triple-angle-bracket patterns (`<<<RESULT>>>`) in comments or strings
 - ✅ Multiple XML-like tags in regex patterns
 - ✅ Special characters (quotes, backslashes, unicode, SQL, HTML entities)
 - ✅ Large files (500+ lines)
@@ -146,7 +148,8 @@ Performance varies based on your setup:
 - ✅ Complex nested structures
 - ✅ Template strings with `${variable}`
 - ✅ Whitespace and indentation preservation
-- ✅ No escaping overhead - delimiter system prevents all tag conflicts
+- ✅ Unique delimiters per request prevent all parsing conflicts (1.6M+ combinations)
+- ✅ Fallback pattern detection for robust delimiter parsing
 
 ## Troubleshooting
 

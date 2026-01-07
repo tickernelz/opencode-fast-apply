@@ -1,6 +1,6 @@
 {
   "name": "opencode-fast-apply",
-  "version": "2.1.6",
+  "version": "2.1.7",
   "description": "OpenCode plugin for Fast Apply - High-performance code editing with OpenAI-compatible APIs (LM Studio, Ollama)",
   "type": "module",
   "main": "dist/index.js",

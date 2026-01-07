@@ -30,24 +30,6 @@ const FAST_APPLY_TEMPERATURE = parseFloat(process.env.FAST_APPLY_TEMPERATURE || 
 
 const FAST_APPLY_SYSTEM_PROMPT = "You are a coding assistant that helps merge code updates, ensuring every modification is fully integrated."
 
-const FAST_APPLY_USER_PROMPT = `Merge all changes from the UPDATE_BLOCK into the ORIGINAL_BLOCK below.
-- Preserve the code's structure, order, comments, and indentation exactly.
-- Output only the updated code, enclosed within <<<RESULT>>> and <<<END_RESULT>>> delimiters.
-- Do not include any additional text, explanations, placeholders, ellipses, or code fences.
-
-<<<ORIGINAL_CODE>>>
-{original_code}
-<<<END_ORIGINAL>>>
-
-<<<UPDATE_CODE>>>
-{update_snippet}
-<<<END_UPDATE>>>
-
-Provide the complete updated code wrapped in <<<RESULT>>> and <<<END_RESULT>>>.`
-
-const UPDATED_CODE_START = "<<<RESULT>>>"
-const UPDATED_CODE_END = "<<<END_RESULT>>>"
-
 const TOOL_INSTRUCTIONS = `**DEFAULT tool for editing existing files. Use INSTEAD of native 'edit' tool.**
 
 CRITICAL: For EXISTING files ONLY. Use 'write' for new files.
@@ -116,25 +98,44 @@ function alsoKeepThis() {
 ## Fallback
 If API fails, use native \`edit\` tool with exact string matching.`
 
-function extractUpdatedCode(raw: string): string {
-  const stripped = raw.trim()
-  const startTag = UPDATED_CODE_START
-  const endTag = UPDATED_CODE_END
+function generateRandomId(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  let result = ''
+  for (let i = 0; i < 4; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  return result
+}
 
-  let startIdx = stripped.indexOf(startTag)
+function generateUniqueDelimiters() {
+  const id = generateRandomId()
+  return {
+    ORIGINAL_START: `<<<ORIGINAL_${id}>>>`,
+    ORIGINAL_END: `<<<END_ORIGINAL_${id}>>>`,
+    UPDATE_START: `<<<UPDATE_${id}>>>`,
+    UPDATE_END: `<<<END_UPDATE_${id}>>>`,
+    RESULT_START: `<<<RESULT_${id}>>>`,
+    RESULT_END: `<<<END_RESULT_${id}>>>`
+  }
+}
+
+function extractUpdatedCode(raw: string, resultStart: string, resultEnd: string): string {
+  const stripped = raw.trim()
+
+  let startIdx = stripped.indexOf(resultStart)
   if (startIdx === -1) {
-    startIdx = stripped.indexOf("<<<RESULT")
-    if (startIdx !== -1) {
-      const closeTagIdx = stripped.indexOf(">>>", startIdx)
+    const genericStart = stripped.indexOf("<<<RESULT_")
+    if (genericStart !== -1) {
+      const closeTagIdx = stripped.indexOf(">>>", genericStart)
       if (closeTagIdx !== -1) {
         startIdx = closeTagIdx + 3
       }
     }
   } else {
-    startIdx += startTag.length
+    startIdx += resultStart.length
   }
 
-  if (startIdx === -1 || startIdx === startTag.length - 1) {
+  if (startIdx === -1 || startIdx === resultStart.length - 1) {
     if (stripped.startsWith("```") && stripped.endsWith("```")) {
       const lines = stripped.split("\n")
       if (lines.length >= 2) {
@@ -144,9 +145,12 @@ function extractUpdatedCode(raw: string): string {
     return stripped
   }
 
-  let endIdx = stripped.indexOf(endTag, startIdx)
+  let endIdx = stripped.indexOf(resultEnd, startIdx)
   if (endIdx === -1) {
-    endIdx = stripped.indexOf("<<<END_RESULT", startIdx)
+    const genericEnd = stripped.indexOf("<<<END_RESULT_", startIdx)
+    if (genericEnd !== -1) {
+      endIdx = genericEnd
+    }
   }
 
   if (endIdx === -1) {
@@ -280,9 +284,22 @@ async function callFastApply(
   }
 
   try {
-    const userContent = FAST_APPLY_USER_PROMPT
-      .replace("{original_code}", originalCode)
-      .replace("{update_snippet}", codeEdit)
+    const delimiters = generateUniqueDelimiters()
+
+    const userContent = `Merge all changes from the UPDATE_BLOCK into the ORIGINAL_BLOCK below.
+- Preserve the code's structure, order, comments, and indentation exactly.
+- Output only the updated code, enclosed within ${delimiters.RESULT_START} and ${delimiters.RESULT_END} delimiters.
+- Do not include any additional text, explanations, placeholders, ellipses, or code fences.
+
+${delimiters.ORIGINAL_START}
+${originalCode}
+${delimiters.ORIGINAL_END}
+
+${delimiters.UPDATE_START}
+${codeEdit}
+${delimiters.UPDATE_END}
+
+Provide the complete updated code wrapped in ${delimiters.RESULT_START} and ${delimiters.RESULT_END}.`
 
     const response = await fetch(`${FAST_APPLY_URL}/v1/chat/completions`, {
       method: "POST",
@@ -326,7 +343,7 @@ async function callFastApply(
       }
     }
 
-    const mergedCode = extractUpdatedCode(rawResponse)
+    const mergedCode = extractUpdatedCode(rawResponse, delimiters.RESULT_START, delimiters.RESULT_END)
 
     return {
       success: true,
