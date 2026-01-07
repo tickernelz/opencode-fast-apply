@@ -212,20 +212,14 @@ function formatFastApplyResult(
   const shortPath = shortenPath(filePath, workingDir)
   const tokenStr = formatTokenCount(modifiedTokens)
   
-  const diffLines = diffPreview.split("\n")
-  const previewLines = diffLines.slice(0, 10)
-  const truncatedDiff = previewLines.join("\n")
-  const hasMore = diffLines.length > 10
-  
   const lines = [
     "✓ Fast Apply complete",
     "",
-    "Applied changes:",
-    `→ ${shortPath}`,
-    `  +${insertions} lines, -${deletions} lines (~${tokenStr} tokens modified)`,
+    `File: ${shortPath}`,
+    `Changes: +${insertions} -${deletions} (~${tokenStr} tokens)`,
     "",
-    "Diff preview (first 10 lines):",
-    truncatedDiff + (hasMore ? "\n..." : "")
+    "Unified diff:",
+    diffPreview
   ]
   
   return lines.join("\n")
@@ -233,11 +227,12 @@ function formatFastApplyResult(
 
 function formatErrorOutput(error: string, filePath: string, workingDir: string): string {
   const shortPath = shortenPath(filePath, workingDir)
+  
   return [
     "✗ Fast Apply failed",
     "",
-    `→ ${shortPath}`,
-    `  Error: ${truncate(error, 100)}`,
+    `File: ${shortPath}`,
+    `Error: ${error}`,
     "",
     "Fallback: Use native 'edit' tool with exact string matching"
   ].join("\n")
@@ -339,7 +334,45 @@ async function callFastApply(
   }
 }
 
-export const FastApplyPlugin: Plugin = async ({ directory }) => {
+async function sendTUINotification(
+  client: any,
+  sessionID: string,
+  filePath: string,
+  workingDir: string,
+  insertions: number,
+  deletions: number,
+  modifiedTokens: number
+): Promise<void> {
+  const shortPath = shortenPath(filePath, workingDir)
+  const tokenStr = formatTokenCount(modifiedTokens)
+  
+  const message = [
+    `▣ Fast Apply | ~${tokenStr} tokens modified`,
+    "",
+    "Applied changes:",
+    `→ ${shortPath}: +${insertions} -${deletions}`
+  ].join("\n")
+
+  try {
+    await client.session.prompt({
+      path: { id: sessionID },
+      body: {
+        noReply: true,
+        parts: [
+          {
+            type: "text",
+            text: message,
+            ignored: true,
+          },
+        ],
+      },
+    })
+  } catch (error: any) {
+    console.error("[fast-apply] Failed to send TUI notification:", error.message)
+  }
+}
+
+export const FastApplyPlugin: Plugin = async ({ directory, client }) => {
   if (!FAST_APPLY_API_KEY) {
     console.warn(
       "[fast-apply] FAST_APPLY_API_KEY not set - fast_apply_edit tool will be disabled"
@@ -371,7 +404,7 @@ export const FastApplyPlugin: Plugin = async ({ directory }) => {
             ),
         },
 
-        async execute(args) {
+        async execute(args, toolCtx) {
           const { target_filepath, instructions, code_edit } = args
 
           // Resolve file path relative to project directory
@@ -439,6 +472,16 @@ write({
 
           const { added, removed } = countChanges(diff)
           const modifiedTokens = estimateTokens(diff)
+
+          await sendTUINotification(
+            client,
+            toolCtx.sessionID,
+            target_filepath,
+            directory,
+            added,
+            removed,
+            modifiedTokens
+          )
 
           return formatFastApplyResult(
             target_filepath,
