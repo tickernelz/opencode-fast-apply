@@ -39,7 +39,7 @@
   "author": "tickernelz",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tickernelz/opencode-fast-apply.git"
+    "url": "git+https://github.com/tickernelz/opencode-fast-apply.git"
   },
   "bugs": {
     "url": "https://github.com/tickernelz/opencode-fast-apply/issues"
