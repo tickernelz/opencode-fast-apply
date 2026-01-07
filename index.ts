@@ -13,13 +13,21 @@ import { createTwoFilesPatch } from "diff"
 import { readFile, writeFile, access } from "fs/promises"
 import { constants } from "fs"
 
+type SessionParams = {
+  agent?: string
+  providerId?: string
+  modelId?: string
+  variant?: string
+}
+
+const sessionParamsCache = new Map<string, SessionParams>()
+
 // Get API key from environment (set in mcpm/jarvis config)
 const FAST_APPLY_API_KEY = process.env.FAST_APPLY_API_KEY || "optional-api-key"
 const FAST_APPLY_URL = (process.env.FAST_APPLY_URL || "http://localhost:1234/v1").replace(/\/v1\/?$/, "")
 const FAST_APPLY_MODEL = process.env.FAST_APPLY_MODEL || "fastapply-1.5b"
 const FAST_APPLY_TIMEOUT = parseInt(process.env.FAST_APPLY_TIMEOUT || "30000", 10)
 const FAST_APPLY_TEMPERATURE = parseFloat(process.env.FAST_APPLY_TEMPERATURE || "0.05")
-const FAST_APPLY_MAX_TOKENS = parseInt(process.env.FAST_APPLY_MAX_TOKENS || "8000", 10)
 
 const FAST_APPLY_SYSTEM_PROMPT = "You are a coding assistant that helps merge code updates, ensuring every modification is fully integrated."
 
@@ -121,7 +129,7 @@ function extractUpdatedCode(raw: string): string {
   const stripped = raw.trim()
   const startTag = UPDATED_CODE_START
   const endTag = UPDATED_CODE_END
-  
+
   let startIdx = stripped.indexOf(startTag)
   if (startIdx === -1) {
     startIdx = stripped.indexOf("<updated-code")
@@ -134,7 +142,7 @@ function extractUpdatedCode(raw: string): string {
   } else {
     startIdx += startTag.length
   }
-  
+
   if (startIdx === -1 || startIdx === startTag.length - 1) {
     if (stripped.startsWith("```") && stripped.endsWith("```")) {
       const lines = stripped.split("\n")
@@ -144,12 +152,12 @@ function extractUpdatedCode(raw: string): string {
     }
     return unescapeXmlTags(stripped)
   }
-  
+
   let endIdx = stripped.indexOf(endTag, startIdx)
   if (endIdx === -1) {
     endIdx = stripped.indexOf("</updated-code", startIdx)
   }
-  
+
   if (endIdx === -1) {
     const extracted = stripped.slice(startIdx).trim()
     const lastCloseTag = extracted.lastIndexOf("</")
@@ -158,12 +166,12 @@ function extractUpdatedCode(raw: string): string {
     }
     return unescapeXmlTags(extracted)
   }
-  
+
   const inner = stripped.substring(startIdx, endIdx)
   if (!inner || inner.trim().length === 0) {
     throw new Error("Empty updated-code block")
   }
-  
+
   return unescapeXmlTags(inner)
 }
 
@@ -223,11 +231,6 @@ function shortenPath(filePath: string, workingDir: string): string {
   return filePath
 }
 
-function truncate(str: string, maxLen: number = 80): string {
-  if (str.length <= maxLen) return str
-  return str.slice(0, maxLen - 3) + "..."
-}
-
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
@@ -242,7 +245,7 @@ function formatFastApplyResult(
 ): string {
   const shortPath = shortenPath(filePath, workingDir)
   const tokenStr = formatTokenCount(modifiedTokens)
-  
+
   const lines = [
     "✓ Fast Apply complete",
     "",
@@ -252,13 +255,13 @@ function formatFastApplyResult(
     "Unified diff:",
     diffPreview
   ]
-  
+
   return lines.join("\n")
 }
 
 function formatErrorOutput(error: string, filePath: string, workingDir: string): string {
   const shortPath = shortenPath(filePath, workingDir)
-  
+
   return [
     "✗ Fast Apply failed",
     "",
@@ -291,7 +294,7 @@ async function callFastApply(
   try {
     const escapedOriginalCode = escapeXmlTags(originalCode)
     const escapedCodeEdit = escapeXmlTags(codeEdit)
-    
+
     const userContent = FAST_APPLY_USER_PROMPT
       .replace("{original_code}", escapedOriginalCode)
       .replace("{update_snippet}", escapedCodeEdit)
@@ -315,7 +318,6 @@ async function callFastApply(
           },
         ],
         temperature: FAST_APPLY_TEMPERATURE,
-        max_tokens: FAST_APPLY_MAX_TOKENS,
       }),
       signal: controller.signal,
     })
@@ -364,30 +366,29 @@ async function callFastApply(
   }
 }
 
-async function sendTUINotification(
+async function sendTUIMessage(
   client: any,
   sessionID: string,
-  filePath: string,
-  workingDir: string,
-  insertions: number,
-  deletions: number,
-  modifiedTokens: number
+  message: string,
+  params: SessionParams
 ): Promise<void> {
-  const shortPath = shortenPath(filePath, workingDir)
-  const tokenStr = formatTokenCount(modifiedTokens)
-  
-  const message = [
-    `▣ Fast Apply | ~${tokenStr} tokens modified`,
-    "",
-    "Applied changes:",
-    `→ ${shortPath}: +${insertions} -${deletions}`
-  ].join("\n")
+  const agent = params.agent || undefined
+  const variant = params.variant || undefined
+  const model = params.providerId && params.modelId
+    ? {
+        providerID: params.providerId,
+        modelID: params.modelId,
+      }
+    : undefined
 
   try {
     await client.session.prompt({
       path: { id: sessionID },
       body: {
         noReply: true,
+        agent: agent,
+        model: model,
+        variant: variant,
         parts: [
           {
             type: "text",
@@ -402,6 +403,51 @@ async function sendTUINotification(
   }
 }
 
+async function sendTUINotification(
+  client: any,
+  sessionID: string,
+  filePath: string,
+  workingDir: string,
+  insertions: number,
+  deletions: number,
+  modifiedTokens: number,
+  params: SessionParams
+): Promise<void> {
+  const shortPath = shortenPath(filePath, workingDir)
+  const tokenStr = formatTokenCount(modifiedTokens)
+  
+  const message = [
+    `▣ Fast Apply | ~${tokenStr} tokens modified`,
+    "",
+    "Applied changes:",
+    `→ ${shortPath}: +${insertions} -${deletions}`
+  ].join("\n")
+
+  await sendTUIMessage(client, sessionID, message, params)
+}
+
+async function sendTUIErrorNotification(
+  client: any,
+  sessionID: string,
+  filePath: string,
+  workingDir: string,
+  errorMessage: string,
+  params: SessionParams
+): Promise<void> {
+  const shortPath = shortenPath(filePath, workingDir)
+  
+  const message = [
+    `✗ Fast Apply Error`,
+    "",
+    `File: ${shortPath}`,
+    `Error: ${errorMessage}`,
+    "",
+    "Fallback: Use native 'edit' tool"
+  ].join("\n")
+
+  await sendTUIMessage(client, sessionID, message, params)
+}
+
 export const FastApplyPlugin: Plugin = async ({ directory, client }) => {
   if (!FAST_APPLY_API_KEY) {
     console.warn(
@@ -414,6 +460,19 @@ export const FastApplyPlugin: Plugin = async ({ directory, client }) => {
   }
 
   return {
+    "chat.message": async (input: {
+      sessionID: string
+      agent?: string
+      model?: { providerID: string; modelID: string }
+      variant?: string
+    }) => {
+      sessionParamsCache.set(input.sessionID, {
+        agent: input.agent,
+        providerId: input.model?.providerID,
+        modelId: input.model?.modelID,
+        variant: input.variant,
+      })
+    },
     tool: {
       fast_apply_edit: tool({
         description: TOOL_INSTRUCTIONS,
@@ -436,6 +495,8 @@ export const FastApplyPlugin: Plugin = async ({ directory, client }) => {
 
         async execute(args, toolCtx) {
           const { target_filepath, instructions, code_edit } = args
+
+          const params = sessionParamsCache.get(toolCtx.sessionID) || {}
 
           // Resolve file path relative to project directory
           const filepath = target_filepath.startsWith("/")
@@ -482,7 +543,16 @@ write({
           )
 
           if (!result.success || !result.content) {
-            return formatErrorOutput(result.error || "Unknown error", target_filepath, directory)
+            const errorMsg = result.error || "Unknown error"
+            await sendTUIErrorNotification(
+              client,
+              toolCtx.sessionID,
+              target_filepath,
+              directory,
+              errorMsg,
+              params
+            )
+            return formatErrorOutput(errorMsg, target_filepath, directory)
           }
 
           const mergedCode = result.content
@@ -491,6 +561,14 @@ write({
             await writeFile(filepath, mergedCode, "utf-8")
           } catch (err) {
             const error = err as Error
+            await sendTUIErrorNotification(
+              client,
+              toolCtx.sessionID,
+              target_filepath,
+              directory,
+              error.message,
+              params
+            )
             return formatErrorOutput(error.message, target_filepath, directory)
           }
 
@@ -510,7 +588,8 @@ write({
             directory,
             added,
             removed,
-            modifiedTokens
+            modifiedTokens,
+            params
           )
 
           return formatFastApplyResult(

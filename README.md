@@ -20,16 +20,6 @@ OpenCode plugin for Fast Apply - High-performance code editing with OpenAI-compa
 npm install -g opencode-fast-apply
 ```
 
-Or add to your OpenCode config to auto-install:
-
-```json
-{
-  "plugin": [
-    "opencode-fast-apply"
-  ]
-}
-```
-
 ### 2. Configure your API endpoint
 
 For **LM Studio** (default):
@@ -62,7 +52,6 @@ Add to your global config (`~/.config/opencode/opencode.json` or `opencode.jsonc
 ```json
 {
   "plugin": [
-    "opencode-pty",
     "opencode-fast-apply"
   ]
 }
@@ -111,7 +100,6 @@ function validateToken(token) {
 | `FAST_APPLY_MODEL` | `fastapply-1.5b` | Model name |
 | `FAST_APPLY_TIMEOUT` | `30000` | Request timeout in ms |
 | `FAST_APPLY_TEMPERATURE` | `0.05` | Temperature (0.0-2.0) |
-| `FAST_APPLY_MAX_TOKENS` | `8000` | Maximum tokens in response |
 
 ## How It Works
 
