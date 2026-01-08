@@ -52,6 +52,17 @@ const TOOL_INSTRUCTIONS = `DEFAULT tool for editing existing files. Use INSTEAD 
 
 CRITICAL: For EXISTING files ONLY. Use 'write' for new files.
 
+WORKFLOW:
+1. Read the file to understand current content
+2. Extract relevant section (50-500 lines with context)
+3. Call fast_apply_edit with original_code (partial) and code_edit
+
+PARTIAL EDITING:
+- You DON'T need to provide the entire file
+- Provide 50-500 lines of context around the area you want to change
+- Include 2-5 lines before and after the target section
+- Tool will automatically find and replace that section in the file
+
 PRIORITY:
 1. fast_apply_edit - ALL file edits (default, 10x faster)
 2. edit - Fallback if API fails
@@ -66,13 +77,27 @@ function updated() { return "modified"; }
 \`\`\`
 
 RULES:
-- MANDATORY: Use \`// ... existing code ...\` markers
-- Include 2-3 lines context before/after edits
-- Preserve exact indentation
+- MANDATORY: Read file first to get original_code
+- Provide 50-500 lines of context (not entire file unless small)
+- Use \`// ... existing code ...\` markers in code_edit
+- Include 2-5 lines context before/after edits
+- Preserve exact indentation and whitespace
 - ONE edit block per call (multiple blocks = suboptimal)
-- Deletions: show context, omit deleted lines
 
-FALLBACK: If API fails, use native 'edit' tool with exact string matching.`
+EXAMPLE:
+\`\`\`typescript
+// 1. Read file
+const content = await read("src/app.ts", { offset: 100, limit: 50 })
+
+// 2. Call fast_apply_edit with partial context
+fast_apply_edit({
+  target_filepath: "src/app.ts",
+  original_code: content,  // Just 50 lines, not entire file!
+  code_edit: "... updated code ..."
+})
+\`\`\`
+
+FALLBACK: If API fails, use native 'edit' tool.`
 
 function escapeXmlTags(text: string): string {
   return text
@@ -203,6 +228,114 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
 
+function normalizeWhitespace(text: string): string {
+  return text
+    .split('\n')
+    .map(line => line.trimEnd())
+    .join('\n')
+    .replace(/\r\n/g, '\n')
+    .trim()
+}
+
+function findExactMatch(haystack: string, needle: string): number {
+  return haystack.indexOf(needle)
+}
+
+function findNormalizedMatch(haystack: string, needle: string): number {
+  const normalizedHaystack = normalizeWhitespace(haystack)
+  const normalizedNeedle = normalizeWhitespace(needle)
+  
+  const index = normalizedHaystack.indexOf(normalizedNeedle)
+  
+  if (index === -1) return -1
+  
+  let actualIndex = 0
+  let normalizedIndex = 0
+  
+  while (normalizedIndex < index && actualIndex < haystack.length) {
+    const char = haystack[actualIndex]
+    const normalizedChar = normalizedHaystack[normalizedIndex]
+    
+    if (char === '\r' && haystack[actualIndex + 1] === '\n') {
+      actualIndex += 2
+      normalizedIndex += 1
+    } else if (char === normalizedChar) {
+      actualIndex++
+      normalizedIndex++
+    } else {
+      actualIndex++
+    }
+  }
+  
+  return actualIndex
+}
+
+async function applyPartialEdit(
+  filepath: string,
+  original_code: string,
+  merged_code: string
+): Promise<{ success: boolean; newFileContent?: string; error?: string }> {
+  const currentFile = await readFile(filepath, "utf-8")
+  
+  if (currentFile.includes('\0')) {
+    return {
+      success: false,
+      error: "Cannot edit binary files"
+    }
+  }
+  
+  let index = findExactMatch(currentFile, original_code)
+  let matchType = "exact"
+  
+  if (index === -1) {
+    index = findNormalizedMatch(currentFile, original_code)
+    matchType = "normalized"
+  }
+  
+  if (index === -1) {
+    return {
+      success: false,
+      error: `Cannot locate original_code in ${filepath}.
+
+The content you provided doesn't match the current file.
+
+POSSIBLE CAUSES:
+- File was modified since you read it
+- Whitespace or indentation differs
+- Wrong section provided
+- File encoding issues
+
+SOLUTIONS:
+1. Re-read the file to get current content
+2. Verify exact whitespace and indentation
+3. Provide more context (more surrounding lines)
+4. Use native 'edit' tool for exact string matching`
+    }
+  }
+  
+  const occurrences = currentFile.split(original_code).length - 1
+  if (occurrences > 1) {
+    return {
+      success: false,
+      error: `original_code appears ${occurrences} times in ${filepath}.
+
+Please provide more context (more surrounding lines) to uniquely identify the section you want to edit.`
+    }
+  }
+  
+  const newFileContent = 
+    currentFile.substring(0, index) +
+    merged_code +
+    currentFile.substring(index + original_code.length)
+  
+  console.log(`[fast-apply] Applied ${matchType} match at position ${index}`)
+  
+  return {
+    success: true,
+    newFileContent
+  }
+}
+
 function formatFastApplyResult(
   filePath: string,
   workingDir: string,
@@ -245,8 +378,7 @@ function formatErrorOutput(error: string, filePath: string, workingDir: string):
  */
 async function callFastApply(
   originalCode: string,
-  codeEdit: string,
-  instructions: string
+  codeEdit: string
 ): Promise<{ success: boolean; content?: string; error?: string }> {
   if (!FAST_APPLY_API_KEY) {
     return {
@@ -443,20 +575,29 @@ export const FastApplyPlugin: Plugin = async ({ directory, client }) => {
           target_filepath: tool.schema
             .string()
             .describe("Path of the file to modify (relative to project root)"),
-          instructions: tool.schema
+          original_code: tool.schema
             .string()
-            .describe(
-              "Brief first-person description of what you're changing (helps disambiguate)"
-            ),
+            .describe(`The original code section to be modified. 
+
+IMPORTANT:
+- Provide 50-500 lines of context around the area you want to change
+- Include 2-5 lines before and after the target section
+- Must match the current file content exactly (whitespace matters)
+- Can be partial (doesn't need to be entire file)
+
+WORKFLOW:
+1. Read the file first to get current content
+2. Extract the relevant section with context
+3. Provide that section as original_code`),
           code_edit: tool.schema
             .string()
             .describe(
-              'The code changes with "// ... existing code ..." markers for unchanged sections'
+              'The updated code with changes applied. Use "// ... existing code ..." markers for unchanged sections within this context.'
             ),
         },
 
         async execute(args, toolCtx) {
-          const { target_filepath, instructions, code_edit } = args
+          const { target_filepath, original_code, code_edit } = args
 
           const params = sessionParamsCache.get(toolCtx.sessionID) || {}
 
@@ -475,15 +616,11 @@ Get your API key at: https://openai.com/api
 Alternatively, use the native 'edit' tool for this change.`
           }
 
-          // Read the original file
-          let originalCode: string
+          // Check if file exists and is writable
           try {
-            await access(filepath, constants.R_OK)
-            originalCode = await readFile(filepath, "utf-8")
+            await access(filepath, constants.R_OK | constants.W_OK)
           } catch (err) {
-            const error = err as Error
-            if (error.message.includes("ENOENT") || error.message.includes("no such file")) {
-              return `Error: File not found: ${target_filepath}
+            return `Error: File not found or not writable: ${target_filepath}
 
 This tool is for EDITING EXISTING FILES ONLY.
 For new file creation, use the 'write' tool instead.
@@ -493,15 +630,12 @@ write({
   filePath: "${target_filepath}",
   content: "your file content here"
 })`
-            }
-            return `Error reading file ${target_filepath}: ${error.message}`
           }
 
-          // Call OpenAI API to merge the edit
+          // Call Fast Apply API to merge the edit
           const result = await callFastApply(
-            originalCode,
-            code_edit,
-            instructions
+            original_code,
+            code_edit
           )
 
           if (!result.success || !result.content) {
@@ -519,8 +653,24 @@ write({
 
           const mergedCode = result.content
 
+          // Apply partial edit with smart matching
+          const applyResult = await applyPartialEdit(filepath, original_code, mergedCode)
+
+          if (!applyResult.success) {
+            await sendTUIErrorNotification(
+              client,
+              toolCtx.sessionID,
+              target_filepath,
+              directory,
+              applyResult.error!,
+              params
+            )
+            return formatErrorOutput(applyResult.error!, target_filepath, directory)
+          }
+
+          // Write merged file back
           try {
-            await writeFile(filepath, mergedCode, "utf-8")
+            await writeFile(filepath, applyResult.newFileContent!, "utf-8")
           } catch (err) {
             const error = err as Error
             await sendTUIErrorNotification(
@@ -534,10 +684,12 @@ write({
             return formatErrorOutput(error.message, target_filepath, directory)
           }
 
+          // Read origfile for diff comparison
+          const originalFileContent = await readFile(filepath, "utf-8")
           const diff = generateUnifiedDiff(
             target_filepath,
-            originalCode,
-            mergedCode
+            originalFileContent,
+            applyResult.newFileContent!
           )
 
           const { added, removed } = countChanges(diff)
