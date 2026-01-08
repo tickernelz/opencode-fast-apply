@@ -228,10 +228,6 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
 
-function formatDiffForMarkdown(diff: string): string {
-  return "```diff\n" + diff + "\n```"
-}
-
 function normalizeWhitespace(text: string): string {
   return text
     .split('\n')
@@ -520,7 +516,7 @@ async function sendTUINotification(
     "",
     `Applied changes to ${shortPath} (+${insertions} -${deletions}):`,
     "",
-    formatDiffForMarkdown(diff)
+    diff
   ].join("\n")
 
   await sendTUIMessage(client, sessionID, message, params)
@@ -659,6 +655,9 @@ write({
 
           const mergedCode = result.content
 
+          // Read original file content BEFORE applying changes (for diff comparison)
+          const originalFileContent = await readFile(filepath, "utf-8")
+
           // Apply partial edit with smart matching
           const applyResult = await applyPartialEdit(filepath, original_code, mergedCode)
 
@@ -690,8 +689,7 @@ write({
             return formatErrorOutput(error.message, target_filepath, directory)
           }
 
-          // Read origfile for diff comparison
-          const originalFileContent = await readFile(filepath, "utf-8")
+          // Generate diff comparing original content with merged content
           const diff = generateUnifiedDiff(
             target_filepath,
             originalFileContent,
