@@ -228,6 +228,10 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
 
+function formatDiffForMarkdown(diff: string): string {
+  return "```diff\n" + diff + "\n```"
+}
+
 function normalizeWhitespace(text: string): string {
   return text
     .split('\n')
@@ -505,6 +509,7 @@ async function sendTUINotification(
   insertions: number,
   deletions: number,
   modifiedTokens: number,
+  diff: string,
   params: SessionParams
 ): Promise<void> {
   const shortPath = shortenPath(filePath, workingDir)
@@ -513,8 +518,9 @@ async function sendTUINotification(
   const message = [
     `▣ Fast Apply | ~${tokenStr} tokens modified`,
     "",
-    "Applied changes:",
-    `→ ${shortPath}: +${insertions} -${deletions}`
+    `Applied changes to ${shortPath} (+${insertions} -${deletions}):`,
+    "",
+    formatDiffForMarkdown(diff)
   ].join("\n")
 
   await sendTUIMessage(client, sessionID, message, params)
@@ -703,6 +709,7 @@ write({
             added,
             removed,
             modifiedTokens,
+            diff,
             params
           )
 
