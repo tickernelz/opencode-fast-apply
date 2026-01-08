@@ -323,13 +323,11 @@ Please provide more context (more surrounding lines) to uniquely identify the se
     }
   }
   
-  const newFileContent = 
+  const newFileContent =
     currentFile.substring(0, index) +
     merged_code +
     currentFile.substring(index + original_code.length)
-  
-  console.log(`[fast-apply] Applied ${matchType} match at position ${index}`)
-  
+
   return {
     success: true,
     newFileContent
@@ -493,7 +491,7 @@ async function sendTUIMessage(
       },
     })
   } catch (error: any) {
-    console.error("[fast-apply] Failed to send TUI notification:", error.message)
+    // Silently fail if notification cannot be sent
   }
 }
 
@@ -545,16 +543,6 @@ async function sendTUIErrorNotification(
 }
 
 export const FastApplyPlugin: Plugin = async ({ directory, client }) => {
-  if (!FAST_APPLY_API_KEY) {
-    console.warn(
-      "[fast-apply] FAST_APPLY_API_KEY not set - fast_apply_edit tool will be disabled"
-    )
-  } else {
-    console.log(
-      `[fast-apply] Plugin loaded with model: ${FAST_APPLY_MODEL} at ${FAST_APPLY_URL}`
-    )
-  }
-
   return {
     "chat.message": async (input: {
       sessionID: string
